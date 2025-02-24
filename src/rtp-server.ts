@@ -1,7 +1,6 @@
 import dgram from "dgram"
 import { createWriteStream, WriteStream } from "fs"
 import { EventEmitter } from "events"
-import { parseRTPHeader } from "./rtp-header"
 
 export class RtpUdpServer extends EventEmitter {
   private server: dgram.Socket
@@ -9,8 +8,6 @@ export class RtpUdpServer extends EventEmitter {
   private fileStream?: WriteStream
   public readonly address: string
   public readonly port: number
-  toLog = true
-  timeout: number | undefined
 
   constructor(host: string, swap16: boolean = false, writeFilePath?: string) {
     super()
@@ -33,16 +30,7 @@ export class RtpUdpServer extends EventEmitter {
       }
     })
 
-    setInterval(() => {
-      this.toLog = true
-    }, 2000)
-
     this.server.on("message", (msg: Buffer) => {
-      // Отбрасываем первые 12 байт RTP-заголовка
-      if (this.toLog) {
-        console.log(parseRTPHeader(msg))
-        this.toLog = false
-      }
       let buf = msg.slice(12)
       buf.swap16()
       if (this.swap16) {
