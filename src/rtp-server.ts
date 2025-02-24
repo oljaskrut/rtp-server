@@ -31,19 +31,11 @@ export class RtpUdpServer extends EventEmitter {
     })
 
     this.server.on("message", (msg: Buffer) => {
-      const payloadType = (msg[1] >> 3) & 0x1f // Extract payload type
-      console.log("payloadType:",payloadType)
       // Отбрасываем первые 12 байт RTP-заголовка
       let buf = msg.slice(12)
+      buf.swap16()
       if (this.swap16) {
-        // Меняем байты местами для каждого 16-битного слова
-        for (let i = 0; i < buf.length; i += 2) {
-          if (i + 1 < buf.length) {
-            const tmp = buf[i]
-            buf[i] = buf[i + 1]
-            buf[i + 1] = tmp
-          }
-        }
+        buf.swap16()
       }
       if (this.fileStream) {
         this.fileStream.write(buf)
