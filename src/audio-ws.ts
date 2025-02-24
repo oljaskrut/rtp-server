@@ -34,13 +34,6 @@ export class AudioWebSocketServer {
 
     // При получении аудио-чанка по UDP – рассылаем его всем подключённым WS клиентам
     this.rtpServer.on("data", (data: Buffer) => {
-      const payloadType = (data[1] >> 3) & 0x1f // Extract payload type
-      console.log(payloadType)
-      if (payloadType === 10) {
-        console.log("Incoming audio is SLIN16")
-      } else {
-        console.log("Audio format is not SLIN16")
-      }
       this.broadcast(data)
     })
   }

@@ -6,7 +6,7 @@ import { AudioWebSocketServer } from "./src/audio-ws"
 const WS_PORT: number = 8081
 const UDP_LISTEN: string = "0.0.0.0:9999"
 // Если хотите записывать аудио в файл, укажите путь, иначе оставьте пустой строкой
-const WRITE_TO_FILE: string = ""
+const WRITE_TO_FILE: string = "file.raw"
 // Если формат аудио требует преобразования байтов, установите swap16 в true
 const SWAP16 = false
 

@@ -31,6 +31,8 @@ export class RtpUdpServer extends EventEmitter {
     })
 
     this.server.on("message", (msg: Buffer) => {
+      const payloadType = (msg[1] >> 3) & 0x1f // Extract payload type
+      console.log("payloadType:",payloadType)
       // Отбрасываем первые 12 байт RTP-заголовка
       let buf = msg.slice(12)
       if (this.swap16) {
