@@ -32,6 +32,7 @@ export class AudioBridge extends EventEmitter {
     // Handle RTP endpoint detection
     this.rtpServer.on("rtp-endpoint", (endpoint: string, buffer: Buffer) => {
       // Look for existing session with this endpoint
+      console.log("endpoint", endpoint)
       let session = this.sessionManager.getSessionByRtpEndpoint(endpoint)
 
       // Create new session if none exists
