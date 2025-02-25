@@ -10,7 +10,7 @@ let wsConnection: any = null
 let audioConnection: any = null
 
 // Audio configuration
-const sampleRate = 16000 // 16kHz for LPCM16
+const sampleRate = 8000 // 16kHz for LPCM16
 const channels = 1 // Mono
 const bytesPerSample = 2 // 16-bit
 
