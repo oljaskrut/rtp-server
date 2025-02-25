@@ -8,6 +8,8 @@ export class RtpUdpServer extends EventEmitter {
   private server: dgram.Socket
   public readonly address: string
   public readonly port: number
+  public asteriskRtpAddress?: string
+  public asteriskRtpPort?: number
 
   constructor(host: string) {
     super()
@@ -26,17 +28,28 @@ export class RtpUdpServer extends EventEmitter {
       this.server.close()
     })
 
-    this.server.on("message", (msg: Buffer) => {
+    this.server.on("message", (msg: Buffer, rinfo) => {
+      // Store the source address and port from Asterisk
+      if (!this.asteriskRtpAddress || !this.asteriskRtpPort) {
+        this.asteriskRtpAddress = rinfo.address
+        this.asteriskRtpPort = rinfo.port
+        console.log(`Detected Asterisk RTP endpoint: ${this.asteriskRtpAddress}:${this.asteriskRtpPort}`)
+      }
       const converted = convert16(msg.slice(12))
       buffAcc.add(converted)
     })
 
     this.on("audio_input", (data: Buffer) => {
+      if (!this.asteriskRtpAddress || !this.asteriskRtpPort) return
       const converted = convert16(data)
       // Create RTP header (simplified)
       const packet = createRTP(converted)
       // Send packet
-      this.server.send(packet, this.port, this.address)
+      this.server.send(packet, this.asteriskRtpPort, this.asteriskRtpAddress, (err) => {
+        if (err) {
+          console.error("Error sending RTP packet:", err)
+        }
+      })
     })
 
     this.server.on("listening", () => {
