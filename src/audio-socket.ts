@@ -14,19 +14,15 @@ wss.on("connection", (ws, req) => {
   console.log("WebSocket connected from:", req.socket.remoteAddress)
 
   ws.on("message", (data: Buffer) => {
-    console.log("WebSocket message received, forwarding to AudioSocket;", "data length:", data?.length)
     if (audioConnection) {
+      console.log("WebSocket message received, forwarding to AudioSocket;", "data length:", data?.length)
       audioConnection.write(data)
     }
   })
 
   ws.on("close", () => {
     console.log("WebSocket closed")
-    if (audioConnection) {
-      audioConnection.close()
-    }
     wsConnection = null
-    audioConnection = null
   })
 })
 
@@ -38,10 +34,6 @@ audioSocket.onConnection(async (req, res) => {
 
   res.onClose(() => {
     console.log("AudioSocket closed")
-    if (wsConnection) {
-      wsConnection.close()
-    }
-    wsConnection = null
     audioConnection = null
   })
 
