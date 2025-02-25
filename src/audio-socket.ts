@@ -2,31 +2,57 @@ import { AudioSocket } from "@fonoster/streams"
 import { WebSocketServer } from "ws"
 
 const audioSocket = new AudioSocket()
-
 const wss = new WebSocketServer({ port: 8081 })
 
-wss.on("listening", () => console.log("WebSocket server listening on port 8081"))
+console.log("WebSocket server listening on port 8081")
+
+let wsConnection: any = null
+let audioConnection: any = null
 
 wss.on("connection", (ws, req) => {
-  console.log("new connection from:", req.socket.remoteAddress)
+  wsConnection = ws
+  console.log("WebSocket connected from:", req.socket.remoteAddress)
 
-  audioSocket.onConnection(async (req, res) => {
-    console.log("new connection from:", req.ref)
+  ws.on("message", (data: Buffer) => {
+    console.log("WebSocket message received, forwarding to AudioSocket;", "data length:", data?.length)
+    if (audioConnection) {
+      audioConnection.write(data)
+    }
+  })
 
-    res.onError((e) => console.log("AudioSocket error:", e))
-    res.onClose(() => console.log("AudioSocket closed"))
+  ws.on("close", () => {
+    console.log("WebSocket closed")
+    if (audioConnection) {
+      audioConnection.close()
+    }
+    wsConnection = null
+    audioConnection = null
+  })
+})
 
-    res.onData((data) => {
-      console.log("AudioSocket data:", data?.length, data?.slice(0,8))
-      ws.send(data)
-    })
+audioSocket.onConnection((req, res) => {
+  audioConnection = res
+  console.log("AudioSocket connected,", "session ref:", req.ref)
 
-    ws.on("message", (data: Buffer) => {
-      res.write(data)
-    })
+  res.onError((err) => console.error("AudioSocket error:", err))
+
+  res.onClose(() => {
+    console.log("AudioSocket closed")
+    if (wsConnection) {
+      wsConnection.close()
+    }
+    wsConnection = null
+    audioConnection = null
+  })
+
+  res.onData((data: Buffer) => {
+    console.log("AudioSocket data received, forwarding to WebSocket;", "data length:", data?.length)
+    if (wsConnection && wsConnection.readyState === wsConnection.OPEN) {
+      wsConnection.send(data)
+    }
   })
 })
 
 audioSocket.listen(9999, () => {
-  console.log("server listening on port 9999")
+  console.log("AudioSocket server listening on port 9999")
 })
