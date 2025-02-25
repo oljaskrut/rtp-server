@@ -20,8 +20,6 @@ export class AudioWebSocketServer {
       // Обработка входящих сообщений от клиента
       socket.on("message", (message: WebSocket.Data) => {
         console.log("Получено сообщение от клиента:", message)
-        // Например, можно эхо-отправить полученные данные обратно клиенту
-        socket.send(message)
       })
     })
 
@@ -30,7 +28,7 @@ export class AudioWebSocketServer {
     })
 
     // Создаём UDP сервер для приёма RTP-аудио
-    this.rtpServer = new RtpUdpServer(udpListen, swap16, writeFilePath)
+    this.rtpServer = new RtpUdpServer(udpListen)
 
     // При получении аудио-чанка по UDP – рассылаем его всем подключённым WS клиентам
     this.rtpServer.on("data", (data: Buffer) => {
