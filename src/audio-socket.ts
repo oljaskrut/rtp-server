@@ -10,45 +10,46 @@ let wsConnection: any = null
 let audioConnection: any = null
 
 // Audio configuration
-const sampleRate = 8000 // 16kHz for LPCM16
+const sampleRate = 8000 // 8kHz PCM
 const channels = 1 // Mono
 const bytesPerSample = 2 // 16-bit
 
-// Queue and playback state management
-const schedule: {
-  chunk: Buffer
-  playTime: number
-  endTime: number
-  duration: number
-}[] = []
-let isPlaying = false
+// Minimum size for audio chunks (to filter out control messages)
+// Adjust this value as needed - e.g., 1000 bytes
+const MIN_AUDIO_CHUNK_SIZE = 1000
 
-// Calculate duration for LPCM16 audio chunk
+// Queue and playback state management
+let lastChunkEndTime = 0
+let processingChunk = false
+
 function getLpcm16Duration(buffer: Buffer): number {
   const totalSamples = buffer.length / bytesPerSample
   return totalSamples / (sampleRate * channels)
 }
 
-// Process and send audio chunks with correct timing
-function processQueue(): void {
-  if (schedule.length === 0) {
-    isPlaying = false
-    return
-  }
+function processAudioChunk(chunk: Buffer): void {
+  if (!audioConnection) return
 
-  const item = schedule.shift()!
+  const duration = getLpcm16Duration(chunk)
   const now = Date.now()
-  const waitTime = Math.max(0, item.playTime - now)
+
+  // Calculate when this chunk should play
+  const playTime = Math.max(lastChunkEndTime, now)
+  const waitTime = Math.max(0, playTime - now)
+
+  console.log(
+    `Processing audio chunk: size=${chunk.length} bytes, duration=${duration.toFixed(3)}s, wait=${waitTime}ms`,
+  )
 
   setTimeout(() => {
-    // Send to Asterisk via AudioSocket
     if (audioConnection) {
-      console.log(`Playing chunk with duration: ${item.duration.toFixed(2)}s, size: ${item.chunk.length} bytes`)
-      audioConnection.write(item.chunk)
-    }
+      console.log(`Playing audio chunk: duration=${duration.toFixed(3)}s`)
+      audioConnection.write(chunk)
 
-    // Schedule next chunk after this one finishes
-    setTimeout(processQueue, item.duration * 1000)
+      // Update the time when this chunk will finish playing
+      lastChunkEndTime = Date.now() + duration * 1000
+      processingChunk = false
+    }
   }, waitTime)
 }
 
@@ -59,29 +60,28 @@ wss.on("connection", (ws, req) => {
   ws.on("message", (data: Buffer) => {
     console.log("WebSocket message received, length:", data?.length)
 
-    // Calculate duration of this audio chunk
-    const duration = getLpcm16Duration(data)
-
-    // Calculate when to play based on previous chunks
-    const now = Date.now()
-    const playTime = schedule.length > 0 ? Math.max(schedule[schedule.length - 1].endTime, now) : now
-
-    const endTime = playTime + duration * 1000 // in milliseconds
-
-    // Add to schedule
-    schedule.push({
-      chunk: data,
-      playTime,
-      endTime,
-      duration,
-    })
-
-    console.log(`Scheduled chunk: duration=${duration.toFixed(2)}s, queue length=${schedule.length}`)
-
-    // Start playing if not already
-    if (!isPlaying) {
-      isPlaying = true
-      processQueue()
+    if (data.length < MIN_AUDIO_CHUNK_SIZE) {
+      // This is likely a control message, send it immediately
+      console.log("Forwarding control message immediately")
+      // if (audioConnection) {
+      console.log("mini", data.toString("utf8"))
+      // }
+    } else {
+      // This is an audio chunk, process with timing
+      if (!processingChunk) {
+        processingChunk = true
+        processAudioChunk(data)
+      } else {
+        // Queue is busy, wait a bit and try again
+        setTimeout(() => {
+          if (!processingChunk) {
+            processingChunk = true
+            processAudioChunk(data)
+          } else {
+            console.log("Dropping chunk - system busy")
+          }
+        }, 100)
+      }
     }
   })
 
@@ -98,6 +98,8 @@ wss.on("connection", (ws, req) => {
 audioSocket.onConnection(async (req, res) => {
   audioConnection = res
   console.log("AudioSocket connected,", "session ref:", req.ref)
+  lastChunkEndTime = 0
+  processingChunk = false
 
   res.onError((err) => console.error("AudioSocket error:", err))
 
