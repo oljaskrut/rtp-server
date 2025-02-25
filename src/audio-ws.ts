@@ -9,7 +9,7 @@ export class AudioWebSocketServer {
   private httpServer: http.Server
   private rtpServer: RtpUdpServer
 
-  constructor(wsPort: number, udpListen: string, writeFilePath?: string, swap16 = false) {
+  constructor(wsPort: number, udpListen: string) {
     // Создаём HTTP-сервер для работы с WebSocket
     this.httpServer = http.createServer()
     this.wss = new WebSocketServer({ server: this.httpServer })
@@ -19,7 +19,7 @@ export class AudioWebSocketServer {
       console.log(`Новое WS-соединение от ${req.socket.remoteAddress}`)
       // Обработка входящих сообщений от клиента
       socket.on("message", (message: WebSocket.Data) => {
-        console.log("Получено сообщение от клиента:", message)
+        this.rtpServer.emit("data", message)
       })
     })
 
