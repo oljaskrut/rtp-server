@@ -30,7 +30,7 @@ wss.on("connection", (ws, req) => {
   })
 })
 
-audioSocket.onConnection((req, res) => {
+audioSocket.onConnection(async (req, res) => {
   audioConnection = res
   console.log("AudioSocket connected,", "session ref:", req.ref)
 
@@ -46,11 +46,11 @@ audioSocket.onConnection((req, res) => {
   })
 
   res.onData((data: Buffer) => {
-    console.log("AudioSocket data received, forwarding to WebSocket;", "data length:", data?.length)
     if (wsConnection && wsConnection.readyState === wsConnection.OPEN) {
       wsConnection.send(data)
     }
   })
+  await res.play("funkloop.mp3")
 })
 
 audioSocket.listen(9999, () => {
