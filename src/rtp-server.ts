@@ -12,15 +12,21 @@ export class RtpUdpServer extends EventEmitter {
   private sequenceNumber: number = 0
   private timestamp: number = 0
   private ssrc: number
-  private lastSendTime: number = 0
-  private packetSize: number = 320 // Default packet size (20ms of 16kHz audio)
-  private packetInterval: number = 20 // Default packet interval in ms
-  private statsInterval: Timer
+  private lastReceivedSequence?: number // Track last received RTP sequence number
+
+  // For statistics
   private packetStats = {
     received: 0,
     sent: 0,
+    lost: 0,
     latePackets: 0,
   }
+
+  // For outgoing (audio_input) rate/timing control
+  private lastSendTime: number = 0
+  private packetSize: number = 320 // Default packet size (in bytes)
+  private packetInterval: number = 20 // in milliseconds
+  private statsInterval: Timer
 
   constructor(host: string) {
     super()
@@ -29,7 +35,7 @@ export class RtpUdpServer extends EventEmitter {
     this.address = addr || "0.0.0.0"
     this.port = parseInt(portStr, 10)
 
-    // Create buffering system for received audio
+    // BufferAccumulator collects audio frames before emitting output
     const buffAcc = new BufferAccumulator(4096, (buffer) => {
       this.emit("audio_output", buffer)
     })
@@ -44,7 +50,7 @@ export class RtpUdpServer extends EventEmitter {
     this.server.on("message", (msg: Buffer, rinfo) => {
       this.packetStats.received++
 
-      // Store the source address and port from Asterisk
+      // Store Asterisk RTP endpoint details if not known
       if (!this.asteriskRtpAddress || !this.asteriskRtpPort) {
         this.asteriskRtpAddress = rinfo.address
         this.asteriskRtpPort = rinfo.port
@@ -56,55 +62,73 @@ export class RtpUdpServer extends EventEmitter {
         return
       }
 
-      // Process payload directly without jitter buffer
+      // Read sequence number (16-bit) from RTP header
+      const sequenceNumber = msg.readUInt16BE(2)
+
+      // Detect packet loss (if we have a previous sequence number)
+      if (this.lastReceivedSequence !== undefined) {
+        const expectedSeq = (this.lastReceivedSequence + 1) & 0xffff
+        if (sequenceNumber !== expectedSeq) {
+          // Determine how many packets are missing (modulo 16 bits)
+          const gap = (sequenceNumber - expectedSeq) & 0xffff
+          console.warn(`Packet loss detected: expected ${expectedSeq}, got ${sequenceNumber}. Lost ${gap} packet(s).`)
+          this.packetStats.lost += gap
+
+          // Inject silence for each lost packet.
+          // Use the current packet’s payload length as a guide.
+          const silenceLength = msg.length - 12 > 0 ? msg.length - 12 : this.packetSize
+          for (let i = 0; i < gap; i++) {
+            const silence = Buffer.alloc(silenceLength) // zero-filled buffer
+            buffAcc.add(silence)
+          }
+        }
+      }
+
+      // Update lastReceivedSequence before processing the actual packet
+      this.lastReceivedSequence = sequenceNumber
+
+      // Extract and convert payload (starting after the 12-byte RTP header)
       const payload = msg.slice(12)
       const converted = convert16(payload)
       buffAcc.add(converted)
     })
 
-    // Improved audio input handling with rate limiting and timing control
+    // Handle outgoing RTP audio (from local audio input)
     this.on("audio_input", (data: Buffer) => {
-      if (!this.asteriskRtpAddress || !this.asteriskRtpPort) return
+      if (!this.asteriskRtpAddress || !this.asteriskRtpPort) {
+        return
+      }
 
       const now = Date.now()
       const timeSinceLastPacket = now - this.lastSendTime
 
-      // Check if we're sending too quickly
-      if (timeSinceLastPacket < this.packetInterval * 0.8 && this.lastSendTime !== 0) {
-        // Skip this packet or queue it for later
+      // Ensure we are not sending too fast
+      if (this.lastSendTime && timeSinceLastPacket < this.packetInterval * 0.8) {
         this.packetStats.latePackets++
         return
       }
-
       this.lastSendTime = now
 
-      // Ensure consistent packet sizes for better audio quality
       let audioData = convert16(data)
 
-      // Create RTP header
+      // Create RTP header (12 bytes)
       const header = Buffer.alloc(12)
-
       // Version: 2, Padding: 0, Extension: 0, CSRC Count: 0
       header[0] = 0x80
-
       // Marker: 0, Payload Type: 11 (slin16)
       header[1] = 0x0b
-
       // Sequence number (16 bits)
       header.writeUInt16BE(this.sequenceNumber & 0xffff, 2)
       this.sequenceNumber++
-
-      // Timestamp (32 bits) - increment by number of samples (16-bit samples)
+      // Timestamp (32 bits) - increment based on number of samples (16-bit samples)
       header.writeUInt32BE(this.timestamp, 4)
       this.timestamp += audioData.length / 2
-
       // SSRC (32 bits)
       header.writeUInt32BE(this.ssrc, 8)
 
-      // Combine header and payload
+      // Combine header and payload into one RTP packet
       const packet = Buffer.concat([header, audioData])
 
-      // Send packet
       this.server.send(packet, this.asteriskRtpPort, this.asteriskRtpAddress, (err) => {
         if (err) {
           console.error("Error sending RTP packet:", err)
@@ -119,22 +143,19 @@ export class RtpUdpServer extends EventEmitter {
       console.log(`UDP server listening on ${addressInfo.address}:${addressInfo.port}`)
     })
 
-    // Bind to specified address and port
+    // Bind the UDP server to the specified address and port
     this.server.bind(this.port, this.address)
 
-    // Log stats periodically
-    const interval = setInterval(() => {
+    // Log statistics periodically
+    this.statsInterval = setInterval(() => {
       console.log(
-        `RTP Stats: received=${this.packetStats.received}, sent=${this.packetStats.sent}, ` +
-          `dropped=${this.packetStats.latePackets}`,
+        `RTP Stats: received=${this.packetStats.received}, sent=${this.packetStats.sent}, lost=${this.packetStats.lost}, dropped=${this.packetStats.latePackets}`,
       )
     }, 10000)
-
-    this.statsInterval = interval
   }
 
   /**
-   * Configure audio parameters for better quality
+   * Configure audio parameters for better quality.
    */
   public configureAudio(options: {
     packetInterval?: number // ms between packets
@@ -146,8 +167,7 @@ export class RtpUdpServer extends EventEmitter {
     }
 
     if (options.sampleRate) {
-      // Calculate packet size based on sample rate and interval
-      // For 16-bit audio: bytes = (sampleRate * packetInterval/1000 * 2)
+      // For 16-bit audio: packetSize = sampleRate * (packetInterval/1000) * 2 bytes
       this.packetSize = Math.floor((options.sampleRate * this.packetInterval * 2) / 1000)
       console.log(`Set packet size to ${this.packetSize} bytes based on ${options.sampleRate}Hz sample rate`)
     }
