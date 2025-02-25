@@ -9,43 +9,79 @@ console.log("WebSocket server listening on port 8081")
 let wsConnection: any = null
 let audioConnection: any = null
 
-// Audio format parameters for 8000 Hz audio (16-bit PCM, mono).
-const sampleRate = 8000 // samples per second
-const bytesPerSample = 2 // 16-bit PCM = 2 bytes per sample
-const channels = 1 // mono audio
+// Audio configuration
+const sampleRate = 16000 // 16kHz for LPCM16
+const channels = 1 // Mono
+const bytesPerSample = 2 // 16-bit
 
-// Set the duration for each smaller chunk that will be sent to AudioSocket.
-const chunkDurationMs = 20 // 20 ms per chunk
+// Queue and playback state management
+const schedule: {
+  chunk: Buffer
+  playTime: number
+  endTime: number
+  duration: number
+}[] = []
+let isPlaying = false
 
-// Calculate bytes per chunk based on the audio format and duration.
-const bytesPerChunk = (sampleRate * bytesPerSample * channels * chunkDurationMs) / 1000 // 320 bytes
+// Calculate duration for LPCM16 audio chunk
+function getLpcm16Duration(buffer: Buffer): number {
+  const totalSamples = buffer.length / bytesPerSample
+  return totalSamples / (sampleRate * channels)
+}
+
+// Process and send audio chunks with correct timing
+function processQueue(): void {
+  if (schedule.length === 0) {
+    isPlaying = false
+    return
+  }
+
+  const item = schedule.shift()!
+  const now = Date.now()
+  const waitTime = Math.max(0, item.playTime - now)
+
+  setTimeout(() => {
+    // Send to Asterisk via AudioSocket
+    if (audioConnection) {
+      console.log(`Playing chunk with duration: ${item.duration.toFixed(2)}s, size: ${item.chunk.length} bytes`)
+      audioConnection.write(item.chunk)
+    }
+
+    // Schedule next chunk after this one finishes
+    setTimeout(processQueue, item.duration * 1000)
+  }, waitTime)
+}
 
 wss.on("connection", (ws, req) => {
   wsConnection = ws
   console.log("WebSocket connected from:", req.socket.remoteAddress)
 
   ws.on("message", (data: Buffer) => {
-    console.log("Received synthesized audio packet from WS, length:", data.length)
+    console.log("WebSocket message received, length:", data?.length)
 
-    // Instead of forwarding the entire packet immediately,
-    // we split it into smaller timed chunks.
-    let offset = 0
-    let chunkIndex = 0
+    // Calculate duration of this audio chunk
+    const duration = getLpcm16Duration(data)
 
-    while (offset < data.length) {
-      const end = Math.min(offset + bytesPerChunk, data.length)
-      const chunk = data.slice(offset, end)
+    // Calculate when to play based on previous chunks
+    const now = Date.now()
+    const playTime = schedule.length > 0 ? Math.max(schedule[schedule.length - 1].endTime, now) : now
 
-      // Schedule writes to the AudioSocket spaced out by chunkDurationMs.
-      setTimeout(() => {
-        if (audioConnection) {
-          audioConnection.write(chunk)
-          console.log(`Wrote chunk ${chunkIndex + 1} (offset: ${offset} to ${end})`)
-        }
-      }, chunkIndex * chunkDurationMs)
+    const endTime = playTime + duration * 1000 // in milliseconds
 
-      offset = end
-      chunkIndex++
+    // Add to schedule
+    schedule.push({
+      chunk: data,
+      playTime,
+      endTime,
+      duration,
+    })
+
+    console.log(`Scheduled chunk: duration=${duration.toFixed(2)}s, queue length=${schedule.length}`)
+
+    // Start playing if not already
+    if (!isPlaying) {
+      isPlaying = true
+      processQueue()
     }
   })
 
@@ -59,9 +95,9 @@ wss.on("connection", (ws, req) => {
   })
 })
 
-audioSocket.onConnection((req, res) => {
+audioSocket.onConnection(async (req, res) => {
   audioConnection = res
-  console.log("AudioSocket connected, session ref:", req.ref)
+  console.log("AudioSocket connected,", "session ref:", req.ref)
 
   res.onError((err) => console.error("AudioSocket error:", err))
 
@@ -74,11 +110,9 @@ audioSocket.onConnection((req, res) => {
     audioConnection = null
   })
 
-  // Optional: Forward any audio received from AudioSocket to the WebSocket.
   res.onData((data: Buffer) => {
-    console.log("AudioSocket data received, length:", data?.length)
     if (wsConnection && wsConnection.readyState === wsConnection.OPEN) {
-      wsConnection.send(data, { binary: true })
+      wsConnection.send(data)
     }
   })
 })
