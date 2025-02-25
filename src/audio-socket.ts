@@ -50,7 +50,7 @@ audioSocket.onConnection(async (req, res) => {
       wsConnection.send(data)
     }
   })
-  await res.play("funkloop.mp3")
+  await res.play("funkloop.wav")
 })
 
 audioSocket.listen(9999, () => {
