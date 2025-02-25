@@ -1,15 +1,13 @@
-import dgram from "dgram"
+import net from "net"
 import { EventEmitter } from "events"
 import { BufferAccumulator } from "./buffer-accumulator"
 import { convert16 } from "./convert"
-import { createRTP } from "./rtp-header"
 
-export class RtpUdpServer extends EventEmitter {
-  private server: dgram.Socket
+export class RtpTcpServer extends EventEmitter {
+  private server: net.Server
+  private client?: net.Socket
   public readonly address: string
   public readonly port: number
-  public asteriskRtpAddress?: string
-  public asteriskRtpPort?: number
   private sequenceNumber: number = 0
   private timestamp: number = 0
   private ssrc: number
@@ -25,28 +23,55 @@ export class RtpUdpServer extends EventEmitter {
       this.emit("audio_output", buffer)
     })
 
-    this.server = dgram.createSocket("udp4")
+    this.server = net.createServer((socket) => {
+      console.log(`New connection from ${socket.remoteAddress}:${socket.remotePort}`)
 
-    this.server.on("error", (err: Error) => {
-      console.error(`UDP Server ошибка: ${err}`)
+      // Store the connected client
+      this.client = socket
+
+      // Handle data chunks - may need to buffer for RTP packet boundaries
+      let dataBuffer = Buffer.alloc(0)
+
+      socket.on("data", (data) => {
+        // Append incoming data to our buffer
+        dataBuffer = Buffer.concat([dataBuffer, data])
+
+        // Process complete RTP packets (minimum 12 bytes for header)
+        while (dataBuffer.length >= 12) {
+          // Get payload size from data we have
+          const payloadLength = dataBuffer.length - 12
+
+          // Extract and process the packet
+          const packet = dataBuffer.slice(0, 12 + payloadLength)
+          const converted = convert16(packet.slice(12))
+          buffAcc.add(converted)
+
+          // Remove the processed packet from buffer
+          dataBuffer = dataBuffer.slice(12 + payloadLength)
+        }
+      })
+
+      socket.on("error", (err) => {
+        console.error(`TCP Socket error: ${err}`)
+      })
+
+      socket.on("close", () => {
+        console.log(`Connection from ${socket.remoteAddress}:${socket.remotePort} closed`)
+        this.client = undefined
+      })
+    })
+
+    this.server.on("error", (err) => {
+      console.error(`TCP Server error: ${err}`)
       this.server.close()
     })
 
-    this.server.on("message", (msg: Buffer, rinfo) => {
-      // Store the source address and port from Asterisk
-      if (!this.asteriskRtpAddress || !this.asteriskRtpPort) {
-        this.asteriskRtpAddress = rinfo.address
-        this.asteriskRtpPort = rinfo.port
-        console.log(`Detected Asterisk RTP endpoint: ${this.asteriskRtpAddress}:${this.asteriskRtpPort}`)
-      }
-      const converted = convert16(msg.slice(12))
-      buffAcc.add(converted)
-    })
-
     this.on("audio_input", (data: Buffer) => {
-      if (!this.asteriskRtpAddress || !this.asteriskRtpPort) return
+      if (!this.client || this.client.destroyed) return
+
       const converted = convert16(data)
       const header = Buffer.alloc(12)
+
       // Version: 2, Padding: 0, Extension: 0, CSRC Count: 0
       header[0] = 0x80
       // Marker: 0, Payload Type: 11 (slin16)
@@ -59,11 +84,12 @@ export class RtpUdpServer extends EventEmitter {
       this.timestamp += converted.length / 2 // Increment by number of samples
       // SSRC (32 bits)
       header.writeUInt32BE(this.ssrc, 8)
+
       // Combine header and payload
       const packet = Buffer.concat([header, converted])
-      // const packet = createRTP(converted)
+
       // Send packet
-      this.server.send(packet, this.asteriskRtpPort, this.asteriskRtpAddress, (err) => {
+      this.client.write(packet, (err) => {
         if (err) {
           console.error("Error sending RTP packet:", err)
         }
@@ -71,14 +97,17 @@ export class RtpUdpServer extends EventEmitter {
     })
 
     this.server.on("listening", () => {
-      const addressInfo = this.server.address()
-      console.log(`UDP сервер прослушивает ${addressInfo.address}:${addressInfo.port}`)
+      const addressInfo = this.server.address() as net.AddressInfo
+      console.log(`TCP server listening at ${addressInfo.address}:${addressInfo.port}`)
     })
 
-    this.server.bind(this.port, this.address)
+    this.server.listen(this.port, this.address)
   }
 
   public close(): void {
+    if (this.client && !this.client.destroyed) {
+      this.client.destroy()
+    }
     this.server.close()
   }
 }
