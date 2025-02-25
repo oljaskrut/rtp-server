@@ -1,4 +1,4 @@
-// src/index.ts
+import { main } from "./src/main"
 
 import { AudioWebSocketServer } from "./src/audio-ws"
 
