@@ -32,13 +32,11 @@ export class RtpUdpServer extends EventEmitter {
     })
 
     this.on("audio_input", (data: Buffer) => {
-      console.log("Получено сообщение от клиента:", data.byteLength)
       const converted = convert16(data)
       // Create RTP header (simplified)
       const packet = createRTP(converted)
       // Send packet
       this.server.send(packet, this.port, this.address)
-      console.log("sent back to udp:", packet.byteLength)
     })
 
     this.server.on("listening", () => {
