@@ -19,7 +19,7 @@ export class AudioWebSocketServer {
       console.log(`Новое WS-соединение от ${req.socket.remoteAddress}`)
       // Обработка входящих сообщений от клиента
       socket.on("message", (message: WebSocket.Data) => {
-        this.rtpServer.emit("data", message)
+        this.rtpServer.emit("audio_input", message)
       })
     })
 
@@ -31,7 +31,7 @@ export class AudioWebSocketServer {
     this.rtpServer = new RtpUdpServer(udpListen)
 
     // При получении аудио-чанка по UDP – рассылаем его всем подключённым WS клиентам
-    this.rtpServer.on("data", (data: Buffer) => {
+    this.rtpServer.on("audio_output", (data: Buffer) => {
       this.broadcast(data)
     })
   }

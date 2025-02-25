@@ -15,7 +15,7 @@ export class RtpUdpServer extends EventEmitter {
     this.port = parseInt(portStr, 10)
 
     const buffAcc = new BufferAccumulator(4096, (buffer) => {
-      this.emit("data", buffer)
+      this.emit("audio_output", buffer)
     })
 
     this.server = dgram.createSocket("udp4")
@@ -30,7 +30,7 @@ export class RtpUdpServer extends EventEmitter {
       buffAcc.add(converted)
     })
 
-    this.on("data", (data: Buffer) => {
+    this.on("audio_input", (data: Buffer) => {
       console.log("Получено сообщение от клиента:", data.byteLength)
       const converted = convert16(data)
       // Create RTP header (simplified)
