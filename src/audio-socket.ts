@@ -14,43 +14,37 @@ const sampleRate = 8000 // 8kHz PCM
 const channels = 1 // Mono
 const bytesPerSample = 2 // 16-bit
 
-// Minimum size for audio chunks (to filter out control messages)
-// Adjust this value as needed - e.g., 1000 bytes
-const MIN_AUDIO_CHUNK_SIZE = 1000
+// Queue for audio chunks
+const audioQueue: Buffer[] = []
+let isProcessing = false
 
-// Queue and playback state management
-let lastChunkEndTime = 0
-let processingChunk = false
+// Process audio chunks in order
+function processQueue() {
+  if (audioQueue.length === 0) {
+    isProcessing = false
+    return
+  }
 
-function getLpcm16Duration(buffer: Buffer): number {
-  const totalSamples = buffer.length / bytesPerSample
-  return totalSamples / (sampleRate * channels)
-}
+  isProcessing = true
+  const chunk = audioQueue.shift()!
 
-function processAudioChunk(chunk: Buffer): void {
-  if (!audioConnection) return
+  // Calculate approximate duration
+  const duration = chunk.length / (bytesPerSample * sampleRate * channels)
+  console.log(`Playing chunk: size=${chunk.length} bytes, approx duration=${duration.toFixed(3)}s`)
 
-  const duration = getLpcm16Duration(chunk)
-  const now = Date.now()
+  if (audioConnection) {
+    audioConnection.write(chunk)
 
-  // Calculate when this chunk should play
-  const playTime = Math.max(lastChunkEndTime, now)
-  const waitTime = Math.max(0, playTime - now)
+    // Wait slightly longer than the calculated duration before playing next chunk
+    // This adds a small buffer to ensure chunks don't overlap
+    const waitTime = duration * 1000 * 1.1 // 10% buffer
 
-  console.log(
-    `Processing audio chunk: size=${chunk.length} bytes, duration=${duration.toFixed(3)}s, wait=${waitTime}ms`,
-  )
-
-  setTimeout(() => {
-    if (audioConnection) {
-      console.log(`Playing audio chunk: duration=${duration.toFixed(3)}s`)
-      audioConnection.write(chunk)
-
-      // Update the time when this chunk will finish playing
-      lastChunkEndTime = Date.now() + duration * 1000
-      processingChunk = false
-    }
-  }, waitTime)
+    setTimeout(() => {
+      processQueue()
+    }, waitTime)
+  } else {
+    isProcessing = false
+  }
 }
 
 wss.on("connection", (ws, req) => {
@@ -60,28 +54,12 @@ wss.on("connection", (ws, req) => {
   ws.on("message", (data: Buffer) => {
     console.log("WebSocket message received, length:", data?.length)
 
-    if (data.length < MIN_AUDIO_CHUNK_SIZE) {
-      // This is likely a control message, send it immediately
-      console.log("Forwarding control message immediately")
-      // if (audioConnection) {
-      console.log("mini", data.toString("utf8"))
-      // }
-    } else {
-      // This is an audio chunk, process with timing
-      if (!processingChunk) {
-        processingChunk = true
-        processAudioChunk(data)
-      } else {
-        // Queue is busy, wait a bit and try again
-        setTimeout(() => {
-          if (!processingChunk) {
-            processingChunk = true
-            processAudioChunk(data)
-          } else {
-            console.log("Dropping chunk - system busy")
-          }
-        }, 100)
-      }
+    // Add to queue
+    audioQueue.push(data)
+
+    // Start processing if not already doing so
+    if (!isProcessing) {
+      processQueue()
     }
   })
 
@@ -92,14 +70,15 @@ wss.on("connection", (ws, req) => {
     }
     wsConnection = null
     audioConnection = null
+    // Clear queue
+    audioQueue.length = 0
+    isProcessing = false
   })
 })
 
 audioSocket.onConnection(async (req, res) => {
   audioConnection = res
   console.log("AudioSocket connected,", "session ref:", req.ref)
-  lastChunkEndTime = 0
-  processingChunk = false
 
   res.onError((err) => console.error("AudioSocket error:", err))
 
@@ -110,6 +89,9 @@ audioSocket.onConnection(async (req, res) => {
     }
     wsConnection = null
     audioConnection = null
+    // Clear queue
+    audioQueue.length = 0
+    isProcessing = false
   })
 
   res.onData((data: Buffer) => {
