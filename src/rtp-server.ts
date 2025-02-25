@@ -10,9 +10,13 @@ export class RtpUdpServer extends EventEmitter {
   public readonly port: number
   public asteriskRtpAddress?: string
   public asteriskRtpPort?: number
+  private sequenceNumber: number = 0
+  private timestamp: number = 0
+  private ssrc: number
 
   constructor(host: string) {
     super()
+    this.ssrc = Math.floor(Math.random() * 0xffffffff) // Random SSRC
     const [addr, portStr] = host.split(":")
     this.address = addr
     this.port = parseInt(portStr, 10)
@@ -42,8 +46,22 @@ export class RtpUdpServer extends EventEmitter {
     this.on("audio_input", (data: Buffer) => {
       if (!this.asteriskRtpAddress || !this.asteriskRtpPort) return
       const converted = convert16(data)
-      // Create RTP header (simplified)
-      const packet = createRTP(converted)
+      const header = Buffer.alloc(12)
+      // Version: 2, Padding: 0, Extension: 0, CSRC Count: 0
+      header[0] = 0x80
+      // Marker: 0, Payload Type: 11 (slin16)
+      header[1] = 0x0b
+      // Sequence number (16 bits)
+      header.writeUInt16BE(this.sequenceNumber & 0xffff, 2)
+      this.sequenceNumber++
+      // Timestamp (32 bits)
+      header.writeUInt32BE(this.timestamp, 4)
+      this.timestamp += converted.length / 2 // Increment by number of samples
+      // SSRC (32 bits)
+      header.writeUInt32BE(this.ssrc, 8)
+      // Combine header and payload
+      const packet = Buffer.concat([header, converted])
+      // const packet = createRTP(converted)
       // Send packet
       this.server.send(packet, this.asteriskRtpPort, this.asteriskRtpAddress, (err) => {
         if (err) {
