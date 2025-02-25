@@ -2,12 +2,12 @@
 
 import WebSocket, { WebSocketServer } from "ws"
 import http from "http"
-import { RtpUdpServer } from "./rtp-server"
+import { RtpTcpServer } from "./rtp-server"
 
 export class AudioWebSocketServer {
   private wss: WebSocketServer
   private httpServer: http.Server
-  private rtpServer: RtpUdpServer
+  private tcpServer: RtpTcpServer
 
   constructor(wsPort: number, udpListen: string) {
     // Создаём HTTP-сервер для работы с WebSocket
@@ -19,7 +19,7 @@ export class AudioWebSocketServer {
       console.log(`Новое WS-соединение от ${req.socket.remoteAddress}`)
       // Обработка входящих сообщений от клиента
       socket.on("message", (message: WebSocket.Data) => {
-        this.rtpServer.emit("audio_input", message)
+        this.tcpServer.emit("audio_input", message)
       })
     })
 
@@ -28,10 +28,10 @@ export class AudioWebSocketServer {
     })
 
     // Создаём UDP сервер для приёма RTP-аудио
-    this.rtpServer = new RtpUdpServer(udpListen)
+    this.tcpServer = new RtpTcpServer(udpListen)
 
     // При получении аудио-чанка по UDP – рассылаем его всем подключённым WS клиентам
-    this.rtpServer.on("audio_output", (data: Buffer) => {
+    this.tcpServer.on("audio_output", (data: Buffer) => {
       this.broadcast(data)
     })
   }
@@ -48,6 +48,6 @@ export class AudioWebSocketServer {
   public close(): void {
     this.wss.close()
     this.httpServer.close()
-    this.rtpServer.close()
+    this.tcpServer.close()
   }
 }
