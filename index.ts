@@ -60,8 +60,6 @@ audioSocket.onConnection(async (req, res) => {
       audioToWsPacketCount++
     }
   })
-
-  await res.play("succession.pcm")
 })
 
 audioSocket.listen(AUDIO_SOCKET_PORT, () => {
