@@ -18,6 +18,8 @@ let audioConnection: any = null
 let wsToAudioPacketCount = 0
 let audioToWsPacketCount = 0
 
+let started = false
+
 // Handle WebSocket connections
 wss.on("connection", (ws, req) => {
   wsConnection = ws
@@ -25,6 +27,10 @@ wss.on("connection", (ws, req) => {
 
   ws.on("message", (data: Buffer) => {
     if (audioConnection) {
+      if (!started) {
+        console.log("Started")
+        started = true
+      }
       wsToAudioPacketCount++
       audioConnection.write(data)
     }
@@ -54,6 +60,8 @@ audioSocket.onConnection(async (req, res) => {
       audioToWsPacketCount++
     }
   })
+
+  await res.play("succession.pcm")
 })
 
 audioSocket.listen(AUDIO_SOCKET_PORT, () => {
@@ -64,6 +72,10 @@ audioSocket.listen(AUDIO_SOCKET_PORT, () => {
 setInterval(() => {
   if (audioConnection) {
     console.log(`Packet Stats: to AS ${wsToAudioPacketCount}, from AS: ${audioToWsPacketCount}`)
+  }
+
+  if (wsToAudioPacketCount === 0) {
+    started = false
   }
   wsToAudioPacketCount = 0
   audioToWsPacketCount = 0
