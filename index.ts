@@ -62,7 +62,9 @@ audioSocket.listen(AUDIO_SOCKET_PORT, () => {
 
 // Periodic logging of packet counts
 setInterval(() => {
-  console.log(Date.now(), `Packet Stats: to AS ${wsToAudioPacketCount}, from AS: ${audioToWsPacketCount}`)
+  if (audioConnection) {
+    console.log(`Packet Stats: to AS ${wsToAudioPacketCount}, from AS: ${audioToWsPacketCount}`)
+  }
   wsToAudioPacketCount = 0
   audioToWsPacketCount = 0
 }, LOG_INTERVAL)
