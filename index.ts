@@ -144,7 +144,6 @@ function cleanupSession(sessionId: string) {
 
 // Periodic logging of packet counts and session cleanup
 setInterval(() => {
-  console.log(`Active sessions: ${sessions.size}`)
   for (const [sessionId, session] of sessions.entries()) {
     const inactiveThreshold = 2 * 60 * 1000
     if (Date.now() - session.lastActivity > inactiveThreshold) {
