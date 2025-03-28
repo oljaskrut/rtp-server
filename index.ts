@@ -49,7 +49,6 @@ wss.on("connection", (ws, req) => {
   ws.on("message", (data: Buffer) => {
     const session = sessions.get(sessionId)
     if (!session) return
-		console.log('WS => AS', data.length)
     session.lastActivity = Date.now()
 
     if (session.audioConnection) {
@@ -115,7 +114,6 @@ audioSocket.onConnection(async (req, res) => {
   res.onData((data: Buffer) => {
     const session = sessions.get(sessionId)
     if (!session) return
-		console.log('AS => WS', data.length)
 
     session.lastActivity = Date.now()
 
