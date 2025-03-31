@@ -1,5 +1,5 @@
 export function convert16(slin16Buffer: Buffer) {
-  // return slin16Buffer
+  return slin16Buffer
 
   const pcm16Buffer = Buffer.from(slin16Buffer)
 
