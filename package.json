@@ -8,8 +8,5 @@
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
-  },
-  "dependencies": {
-    "@fonoster/streams": "^0.9.12"
   }
 }
